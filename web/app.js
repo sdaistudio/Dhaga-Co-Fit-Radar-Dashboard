@@ -1,8 +1,36 @@
 // Fit Radar front end. Plain JavaScript, no build step. All data comes from /api/state.
-const S = { tab: 'week', sel: null, filter: 'all', cSel: null, shownQueue: 8, data: null, poll: null };
+// With no server (a static host such as GitHub Pages) it opens in Replay mode: it shows the saved demo run
+// and keeps tags and approvals in this browser only.
+const S = { tab: 'week', sel: null, filter: 'all', cSel: null, shownQueue: 8, data: null, poll: null, replay: false };
 const $ = (id) => document.getElementById(id);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const api = (path, body) => fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
+const api = (path, body) => fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  .then((r) => { if (!r.ok) throw new Error(`${path}: ${r.status}`); return r.json(); });
+
+// ---- Replay mode: no server, the saved run, tags and approvals kept in this browser ----
+const REPLAY_RUN = 'demo_run/run.json';
+const local = {
+  get(key) { try { return JSON.parse(localStorage.getItem(`fitradar.${key}`)) || {}; } catch { return {}; } },
+  set(key, value) { try { localStorage.setItem(`fitradar.${key}`, JSON.stringify(value)); } catch { /* storage blocked: kept for this visit only */ } return value; },
+};
+async function replayState() {
+  const run = await fetch(REPLAY_RUN).then((r) => { if (!r.ok) throw new Error(`${REPLAY_RUN}: ${r.status}`); return r.json(); });
+  const reader = run.provider === 'offline' ? 'Offline keyword rules (no model, no cost)' : `${run.models.fast} + ${run.models.strong}`;
+  return { run, tags: local.get('tags'), actions: local.get('actions'), status: { running: false, step: 0, note: '', error: '' },
+    steps: run.steps, next_reader: 'not available in Replay mode', run_reader: reader, stand_in: true, replay: true };
+}
+function saveTag(id, tag) {
+  if (!S.replay) return api('/api/tag', { comment_id: id, tag });
+  const tags = { ...S.data.tags }; if (tag) tags[id] = tag; else delete tags[id];
+  return Promise.resolve(local.set('tags', tags));
+}
+function saveAction(body) {
+  if (!S.replay) return api('/api/action', body);
+  const acts = { ...S.data.actions };
+  if (body.decision) acts[body.key] = { decision: body.decision, fix: body.fix, label: body.label, when: new Date().toISOString().slice(0, 10) };
+  else delete acts[body.key];
+  return Promise.resolve(local.set('actions', acts));
+}
 
 const REASONS = [
   { key: 'fit', label: 'Fit', color: 'var(--accent)' }, { key: 'quality', label: 'Quality', color: 'var(--accent-2)' },
@@ -16,7 +44,17 @@ const pillFor = (c) => (c.status === 'unreadable_rule' ? 'p-grey' : c.status ===
   : c.group === 'quality' ? 'p-blue' : c.group === 'other' ? 'p-grey' : 'p-flag');
 
 async function load() {
-  S.data = await api('/api/state');
+  try {
+    S.data = await api('/api/state');
+  } catch {
+    try {
+      S.data = await replayState(); S.replay = true;
+    } catch {
+      $('week').textContent = '';
+      $('main').innerHTML = '<p class="empty">Fit Radar could not load any data. Check your connection and reload the page.</p>';
+      return;
+    }
+  }
   const run = S.data.run;
   if (run && !S.sel) S.sel = run.groups[0]?.key;
   render();
@@ -34,7 +72,7 @@ function render() {
   const d = S.data, run = d.run;
   $('week').textContent = run ? `Week of ${run.week_of} · return comments and reviews` : 'No run yet';
   $('badge').hidden = !d.stand_in;
-  $('reader').textContent = run ? `Read by: ${d.run_reader}` : '';
+  $('reader').textContent = run ? `${S.replay ? 'Replay: saved demo run · ' : ''}Read by: ${d.run_reader}` : '';
   const approved = Object.values(d.actions).filter((a) => a.decision === 'ok').length;
   const tabs = [['week', 'This week'], ['comments', 'Comments'], ['queue', 'Review queue', run ? queueLeft() : ''],
     ['actions', 'Actions', approved || ''], ['run', 'Run and cost']];
@@ -186,11 +224,18 @@ function viewRun() {
         : c.priced ? `At about ${c.weekly_comments.toLocaleString()} comments a week: roughly ₹${c.weekly_inr.toLocaleString()} a week. ₹${c.usd_to_inr} to the dollar.`
           : 'Prices for this provider are not set, so cost shows as zero. Set them in the environment (see docs/MODEL_OPTIONS.md).'}</div>`;
   }
-  const err = st.error ? `<div class="warnbox">${esc(st.error)}</div>` : '';
+  const err = (S.replay ? '<div class="warnbox"><b>Replay mode.</b> This is a saved run, shown without a server. Tags and approvals are kept in this browser only. To read new data, run Fit Radar on your own machine (see the README).</div>' : '')
+    + (st.error ? `<div class="warnbox">${esc(st.error)}</div>` : '');
+  const runButton = S.replay ? '' : `<button class="btn primary" data-run="1" ${st.running ? 'disabled' : ''}>${st.running ? 'Running…' : run ? 'Run again' : 'Run'}</button>`;
+  const upload = S.replay ? '<div class="note">Uploading files needs Fit Radar running on your own machine.</div>'
+    : `<label class="h" for="fc">Comments file (CSV)</label><input type="file" id="fc" accept=".csv">
+        <label class="h" for="fu">Units-sold file (CSV)</label><input type="file" id="fu" accept=".csv">
+        <div class="btns"><button class="btn small" data-upload="1">Use these files</button>${d.stand_in ? '' : '<button class="btn small" data-bundled="1">Back to bundled files</button>'}</div>
+        <div class="note" id="upmsg"></div>`;
   return `${err}<div class="split"><div class="card col" style="padding:16px 18px">
       <div class="between" style="align-items:center"><div><div style="font-size:16px;font-weight:700">The run, step by step</div>
         <div class="note" style="font-size:14px">${st.running ? `Running step ${Math.min(st.step, 7)} of 7…` : run ? `Last run finished ${esc(run.finished_at)}.` : 'Nothing has run yet.'} Next run uses: ${esc(d.next_reader)}.</div></div>
-        <button class="btn primary" data-run="1" ${st.running ? 'disabled' : ''}>${st.running ? 'Running…' : run ? 'Run again' : 'Run'}</button></div>
+        ${runButton}</div>
       <div class="tablewrap"><div class="rows">${steps}</div></div></div>
     <div class="col"><div class="card col" style="padding:16px 18px;gap:6px"><h2 style="padding:0">What this run cost</h2>${cost}</div>
       <div class="card col" style="padding:16px 18px;gap:8px"><h2 style="padding:0">Who does what</h2>
@@ -200,10 +245,7 @@ function viewRun() {
         <div class="path"><span class="pill p-flag">Person</span><span>Reads what neither reader could, and approves every fix.</span></div></div>
       <div class="card col" style="padding:16px 18px;gap:8px"><h2 style="padding:0">Data</h2>
         <div class="note">${d.stand_in ? 'Using the bundled stand-in files in data/.' : 'Using the files you uploaded.'}</div>
-        <label class="h" for="fc">Comments file (CSV)</label><input type="file" id="fc" accept=".csv">
-        <label class="h" for="fu">Units-sold file (CSV)</label><input type="file" id="fu" accept=".csv">
-        <div class="btns"><button class="btn small" data-upload="1">Use these files</button>${d.stand_in ? '' : '<button class="btn small" data-bundled="1">Back to bundled files</button>'}</div>
-        <div class="note" id="upmsg"></div></div></div></div>`;
+        ${upload}</div></div></div>`;
 }
 
 function startPolling() {
@@ -224,12 +266,12 @@ document.addEventListener('click', async (e) => {
   else if (ds.filter) { S.filter = ds.filter; S.cSel = null; render(); }
   else if (ds.comment) { S.cSel = ds.comment; render(); }
   else if (ds.more) { S.shownQueue += 8; render(); }
-  else if (ds.tag !== undefined) { S.data.tags = await api('/api/tag', { comment_id: ds.id, tag: ds.tag || null }); render(); }
+  else if (ds.tag !== undefined) { S.data.tags = await saveTag(ds.id, ds.tag || null); render(); }
   else if (ds.act) {
     const g = S.data.run.groups.find((x) => x.key === ds.key);
     const body = { key: ds.key, decision: ds.act === 'undo' ? null : ds.act, fix: g.finding?.suggested_fix || '', label: `${g.vendor_id} ${g.category}` };
-    S.data.actions = await api('/api/action', body); render();
-  } else if (ds.run) { S.data.status = await api('/api/run', {}); render(); startPolling(); }
+    S.data.actions = await saveAction(body); render();
+  } else if (ds.run && !S.replay) { S.data.status = await api('/api/run', {}); render(); startPolling(); }
   else if (ds.upload) {
     const fc = $('fc').files[0], fu = $('fu').files[0];
     if (!fc || !fu) { $('upmsg').textContent = 'Choose both files first.'; return; }
