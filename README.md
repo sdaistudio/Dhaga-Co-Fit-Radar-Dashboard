@@ -12,6 +12,8 @@ pinned: false
 
 Fit Radar reads return comments and product reviews for a fashion brand, records why each item came back, and shows which vendors have a fit problem, in which direction, with a suggested size-chart fix for a person to approve.
 
+**Live demo (Replay mode, saved run):** https://sdaistudio.github.io/Dhaga-Co-Fit-Radar-Dashboard/
+
 Built for FDE Academy Tech Track, Mini Project 1 (the Dhaga & Co. engagement). Dhaga & Co. is a case study. **All data in this repository is invented stand-in data.**
 
 ## Run it in five minutes
@@ -85,7 +87,7 @@ See `docs/DEPLOYMENT.md`. The repository includes a `Dockerfile` and the header 
 ## Brief checklist
 
 - [x] Visible front end, usable without narration
-- [ ] Deployed to a public URL (see `docs/DEPLOYMENT.md`)
+- [x] Deployed to a public URL: GitHub Pages, Replay mode (see `docs/DEPLOYMENT.md`)
 - [x] Runs locally from the repository
 - [x] Four patterns, each for a reason
 - [x] Code versus model line: no number is computed by a model
