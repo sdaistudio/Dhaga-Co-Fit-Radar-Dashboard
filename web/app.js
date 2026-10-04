@@ -4,7 +4,10 @@
 const S = { tab: 'week', sel: null, filter: 'all', cSel: null, shownQueue: 8, data: null, poll: null, replay: false };
 const $ = (id) => document.getElementById(id);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const api = (path, body) => fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+const API_BASE = ((location.hostname === 'localhost' || location.hostname === '127.0.0.1') && location.port !== '7860')
+  ? `${location.protocol}//${location.hostname}:7860`
+  : '';
+const api = (path, body) => fetch(`${API_BASE}${path}`, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   .then((r) => { if (!r.ok) throw new Error(`${path}: ${r.status}`); return r.json(); });
 
 // ---- Replay mode: no server, the saved run, tags and approvals kept in this browser ----
@@ -59,6 +62,7 @@ const pillFor = (c) => (c.status === 'unreadable_rule' ? 'p-grey' : c.status ===
 async function load() {
   try {
     S.data = await api('/api/state');
+    S.replay = false;
   } catch {
     try {
       S.data = await replayState(); S.replay = true;
@@ -259,12 +263,11 @@ function viewRun() {
   }
   const err = (S.replay ? '<div class="warnbox"><b>Replay mode.</b> This is a saved run, shown without a server. Tags and approvals are kept in this browser only. To read new data, run Fit Radar on your own machine (see the README).</div>' : '')
     + (st.error ? `<div class="warnbox">${esc(st.error)}</div>` : '');
-  const runButton = S.replay ? '' : `<button class="btn primary" data-run="1" ${st.running ? 'disabled' : ''}>${st.running ? 'Running…' : run ? 'Run again' : 'Run'}</button>`;
-  const upload = S.replay ? '<div class="note">Uploading files needs Fit Radar running on your own machine.</div>'
-    : `<label class="h" for="fc">Comments file (CSV)</label><input type="file" id="fc" accept=".csv">
+  const runButton = `<button class="btn primary" data-run="1" ${st.running ? 'disabled' : ''}>${st.running ? 'Running…' : run ? 'Run again' : 'Run'}</button>`;
+  const upload = `<label class="h" for="fc">Comments file (CSV)</label><input type="file" id="fc" accept=".csv">
         <label class="h" for="fu">Units-sold file (CSV)</label><input type="file" id="fu" accept=".csv">
         <div class="btns"><button class="btn small" data-upload="1">Use these files</button>${d.stand_in ? '' : '<button class="btn small" data-bundled="1">Back to bundled files</button>'}</div>
-        <div class="note" id="upmsg"></div>`;
+        <div class="note" id="upmsg">${S.replay ? 'Note: Fit Radar server must be running on port 7860 to process uploads.' : ''}</div>`;
   return `${err}<div class="split"><div class="card col" style="padding:16px 18px">
       <div class="between" style="align-items:center"><div><div style="font-size:16px;font-weight:700">The run, step by step</div>
         <div class="note" style="font-size:14px">${st.running ? `Running step ${Math.min(st.step, 7)} of 7…` : run ? `Last run finished ${esc(run.finished_at)}.` : 'Nothing has run yet.'} Next run uses: ${esc(d.next_reader)}.</div></div>
@@ -309,13 +312,37 @@ document.addEventListener('click', async (e) => {
     const note = ($('notetext')?.value || '').trim();
     const body = { key: ds.key, decision: ds.act === 'undo' ? null : ds.act, fix, note, label: `${g.vendor_id} ${g.category}` };
     S.data.actions = await saveAction(body); render();
-  } else if (ds.run && !S.replay) { S.data.status = await api('/api/run', {}); render(); startPolling(); }
-  else if (ds.upload) {
-    const fc = $('fc').files[0], fu = $('fu').files[0];
+  } else if (ds.run) {
+    try {
+      S.data.status = await api('/api/run', {});
+      S.replay = false;
+      render();
+      startPolling();
+    } catch {
+      alert('Could not start run: Ensure server is running on http://localhost:7860.');
+    }
+  } else if (ds.upload) {
+    const fc = $('fc')?.files[0], fu = $('fu')?.files[0];
     if (!fc || !fu) { $('upmsg').textContent = 'Choose both files first.'; return; }
     const form = new FormData(); form.append('comments', fc); form.append('units', fu);
-    await fetch('/api/upload', { method: 'POST', body: form }); await load(); $('upmsg').textContent = 'Files saved. Press Run to read them.';
-  } else if (ds.bundled) { await api('/api/use-bundled', {}); await load(); }
+    try {
+      const res = await fetch(`${API_BASE}/api/upload`, { method: 'POST', body: form });
+      if (!res.ok) throw new Error(`${res.status}`);
+      S.replay = false;
+      await load();
+      $('upmsg').textContent = 'Files saved. Press Run to read them.';
+    } catch {
+      $('upmsg').textContent = 'Upload failed. Ensure the server is running on http://localhost:7860.';
+    }
+  } else if (ds.bundled) {
+    try {
+      await api('/api/use-bundled', {});
+      S.replay = false;
+      await load();
+    } catch {
+      $('upmsg').textContent = 'Failed to reset to bundled files. Ensure server is running on http://localhost:7860.';
+    }
+  }
 });
 
 load();
