@@ -25,6 +25,13 @@ python data/generate_synthetic.py                      # writes the 2,000-record
 uvicorn server:app --port 7860
 ```
 
+Or run using Docker:
+
+```bash
+docker build -t fitradar .
+docker run -d --name fitradar-app -p 7860:7860 fitradar
+```
+
 Open http://localhost:7860. With no API key the app opens on a saved demo run made with offline keyword rules, so every tab works at once.
 
 To read the comments with a real model, copy `.env.example` to `.env`, add a key, load it into your shell (`set -a; source .env; set +a`), restart, then press **Run** on the Run and cost tab.
