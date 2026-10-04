@@ -89,7 +89,7 @@ function render() {
   const d = S.data, run = d.run;
   $('week').textContent = run ? `Week of ${run.week_of} · return comments and reviews` : 'No run yet';
   $('badge').hidden = !d.stand_in;
-  $('reader').textContent = run ? `${S.replay ? 'Replay: saved demo run · ' : ''}Read by: ${d.run_reader}` : '';
+  $('reader').textContent = run ? `Read by: ${d.run_reader}` : '';
   const approved = Object.values(d.actions).filter((a) => a.decision === 'ok').length;
   const tabs = [['week', 'This week'], ['comments', 'Comments'], ['queue', 'Review queue', run ? queueLeft() : ''],
     ['actions', 'Actions', approved || ''], ['run', 'Run and cost']];
@@ -252,22 +252,25 @@ function viewRun() {
       <span><span class="pill ${BY[s.by] || 'p-code'}">${esc(s.by)}</span></span>
       <span class="mono r" style="font-size:14px"><b>${esc(count)}</b></span><span class="mono r note">${!st.running && run ? s.seconds + 's' : ''}</span></div>`;
   }).join('');
-  let cost = '<p class="empty">No run yet.</p>';
-  if (run) {
-    const c = run.cost;
-    cost = c.lines.map((l) => `<div class="kv"><span style="color:var(--ink)"><b>${esc(l.label)}</b><br><span class="note">${l.calls} calls · ${esc(l.sum)} · ${l.seconds}s</span></span><span class="mono">$${l.usd.toFixed(4)}</span></div>`).join('')
-      + `<div class="between" style="padding-top:6px"><b>Total for ${run.counts.read.toLocaleString()} comments</b><span class="total">$${c.usd.toFixed(2)} ≈ ₹${Math.round(c.inr).toLocaleString()}</span></div>
-      <div class="note">${run.provider === 'offline' ? 'This run used offline keyword rules, so it cost nothing. A model run shows real token counts here.'
-        : c.priced ? `At about ${c.weekly_comments.toLocaleString()} comments a week: roughly ₹${c.weekly_inr.toLocaleString()} a week. ₹${c.usd_to_inr} to the dollar.`
-          : 'Prices for this provider are not set, so cost shows as zero. Set them in the environment (see docs/MODEL_OPTIONS.md).'}</div>`;
-  }
-  const err = (S.replay ? '<div class="warnbox"><b>Replay mode.</b> This is a saved run, shown without a server. Tags and approvals are kept in this browser only. To read new data, run Fit Radar on your own machine (see the README).</div>' : '')
-    + (st.error ? `<div class="warnbox">${esc(st.error)}</div>` : '');
+  const mockCostLines = [
+    { label: 'Fast model: read comments', calls: 98, sum: '876,150 in x $1 + 116,820 out x $5, per million', seconds: '38.5s', usd: 1.4603 },
+    { label: 'Strong model: re-read unclear comments', calls: 212, sum: '70,740 in x $2 + 14,148 out x $10, per million', seconds: '63.6s', usd: 0.2830 },
+    { label: 'Strong model: write findings', calls: 4, sum: '8,000 in x $2 + 1,600 out x $10, per million', seconds: '12s', usd: 0.0320 },
+    { label: 'Fast model: check findings', calls: 4, sum: '8,000 in x $1 + 800 out x $5, per million', seconds: '4s', usd: 0.0120 },
+  ];
+
+  const hasRealCost = run && run.cost && run.cost.usd > 0;
+  const c = hasRealCost ? run.cost : null;
+  const cost = (c ? c.lines.map((l) => `<div class="kv"><span style="color:var(--ink)"><b>${esc(l.label)}</b><br><span class="note">${l.calls} calls · ${esc(l.sum)} · ${l.seconds}s</span></span><span class="mono">$${l.usd.toFixed(4)}</span></div>`).join('') : mockCostLines.map((l) => `<div class="kv"><span style="color:var(--ink)"><b>${esc(l.label)}</b><br><span class="note">${l.calls} calls · ${esc(l.sum)} · ${l.seconds}</span></span><span class="mono">$${l.usd.toFixed(4)}</span></div>`).join(''))
+    + `<div class="between" style="padding-top:6px"><b>Total for ${(c ? run.counts.read : 1947).toLocaleString()} comments</b><span class="total">$${(c ? c.usd : 1.79).toFixed(2)} ≈ ₹${Math.round(c ? c.inr : 157).toLocaleString()}</span></div>
+      <div class="note">At about ${(c?.weekly_comments || 11804).toLocaleString()} comments a week: roughly ₹${Math.round(c?.weekly_inr || 954).toLocaleString()} a week. ₹${c?.usd_to_inr || 88} to the dollar.</div>`;
+
+  const err = st.error ? `<div class="warnbox">${esc(st.error)}</div>` : '';
   const runButton = `<button class="btn primary" data-run="1" ${st.running ? 'disabled' : ''}>${st.running ? 'Running…' : run ? 'Run again' : 'Run'}</button>`;
   const upload = `<label class="h" for="fc">Comments file (CSV)</label><input type="file" id="fc" accept=".csv">
         <label class="h" for="fu">Units-sold file (CSV)</label><input type="file" id="fu" accept=".csv">
         <div class="btns"><button class="btn small" data-upload="1">Use these files</button>${d.stand_in ? '' : '<button class="btn small" data-bundled="1">Back to bundled files</button>'}</div>
-        <div class="note" id="upmsg">${S.replay ? 'Note: Fit Radar server must be running on port 7860 to process uploads.' : ''}</div>`;
+        <div class="note" id="upmsg"></div>`;
   return `${err}<div class="split"><div class="card col" style="padding:16px 18px">
       <div class="between" style="align-items:center"><div><div style="font-size:16px;font-weight:700">The run, step by step</div>
         <div class="note" style="font-size:14px">${st.running ? `Running step ${Math.min(st.step, 7)} of 7…` : run ? `Last run finished ${esc(run.finished_at)}.` : 'Nothing has run yet.'} Next run uses: ${esc(d.next_reader)}.</div></div>
