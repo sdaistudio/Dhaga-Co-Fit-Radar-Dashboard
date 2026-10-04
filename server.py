@@ -5,6 +5,7 @@ Run locally:  uvicorn server:app --reload --port 7860
 import threading
 from pathlib import Path
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -15,6 +16,13 @@ from fitradar.ingest import BadFile
 from fitradar.llm import ModelError
 
 app = FastAPI(title="Fit Radar")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 STATUS = {"running": False, "step": 0, "note": "", "error": ""}
 UPLOADS = config.RUNS_DIR / "uploads"
 LOCK = threading.Lock()
