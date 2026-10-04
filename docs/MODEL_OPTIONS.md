@@ -5,9 +5,14 @@ The pipeline needs two roles: a **fast** model that reads every comment and chec
 | Setting `FITRADAR_PROVIDER` | Fast | Strong | Needs |
 |---|---|---|---|
 | `anthropic` (default when a key is present) | Claude Haiku 4.5 | Claude Sonnet 5.5 | `ANTHROPIC_API_KEY` |
+| `openrouter` | Claude Haiku 4.5 (default) | Claude Sonnet 5.5 (default) | `OPENROUTER_API_KEY` |
 | `openai` | a GPT model you choose | a GPT model you choose | `OPENAI_API_KEY`, `OPENAI_FAST_MODEL`, `OPENAI_STRONG_MODEL` |
 | `offline` | keyword rules | keyword rules | nothing |
-| `auto` | Claude if its key is set, else GPT, else offline | | |
+| `auto` | Claude if its key is set, else OpenRouter, else GPT, else offline | | |
+
+## OpenRouter
+
+One key for many models, through OpenRouter's OpenAI-compatible API. The defaults are the same Claude pair, as `anthropic/claude-haiku-4.5` and `anthropic/claude-sonnet-5.5`. Check the exact ids on openrouter.ai/models. To use other models, set `OPENROUTER_FAST_MODEL` and `OPENROUTER_STRONG_MODEL` and also the four `OPENROUTER_*_PRICE_*` values, because the cost tab multiplies tokens by those prices. Pick models that support structured (JSON schema) output, or many replies will fail validation and go to the review queue.
 
 ## Claude
 
@@ -39,10 +44,10 @@ Cost and seconds are on the Run and cost tab after each run.
 
 ## How the switch works
 
-`fitradar/llm.py` builds the models through LangChain (`ChatAnthropic` or `ChatOpenAI`) and asks each for schema-constrained output with `with_structured_output`. The LangGraph pipeline in `fitradar/graph.py` only ever calls four methods on the reader (`read_batches`, `reread`, `write_finding`, `evaluate`), so it does not change when the provider does.
+`fitradar/llm.py` builds the models through LangChain (`ChatAnthropic`, or `ChatOpenAI` for GPT and OpenRouter) and asks each for schema-constrained output with `with_structured_output`. The LangGraph pipeline in `fitradar/graph.py` only ever calls four methods on the reader (`read_batches`, `reread`, `write_finding`, `evaluate`), so it does not change when the provider does.
 
 To mix providers (for example GPT to read and Claude to write), change `ModelReader._chat` to choose the provider per role. To add another provider, install its LangChain package and add a branch there.
 
 ## Not yet tested
 
-The Claude and GPT paths were built and checked for construction, but have not been run against the live services from this repository. Expect to adjust on the first real run: for example, a model that rejects a temperature setting, or a schema feature a provider does not accept.
+The Claude, OpenRouter and GPT paths were built and checked for construction, but have not been run against the live services from this repository. Expect to adjust on the first real run: for example, a model that rejects a temperature setting, or a schema feature a provider does not accept.

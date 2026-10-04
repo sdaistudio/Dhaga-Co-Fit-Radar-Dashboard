@@ -55,5 +55,21 @@ def test_offline_costs_nothing_and_says_so():
     assert out["usd"] == 0 and out["priced"] is False
 
 
+def test_reported_cost_is_used_instead_of_a_price_guess():
+    rows = [{"role": "fast", "step": "read", "calls": 1, "input_tokens": 1000, "output_tokens": 500, "seconds": 0.0, "billed_usd": 0.01},
+            {"role": "fast", "step": "read", "calls": 1, "input_tokens": 1000, "output_tokens": 500, "seconds": 0.0, "billed_usd": 0.03}]
+    out = cost.summarise(rows, "openrouter", comments_read=40)
+    assert out["lines"][0]["usd"] == pytest.approx(0.04)
+    assert "billed $0.0400 by the service across 2 calls" in out["lines"][0]["sum"]
+    assert out["priced"] is True
+
+
+def test_partly_reported_cost_falls_back_to_price_times_tokens():
+    rows = [{"role": "fast", "step": "read", "calls": 1, "input_tokens": 1_000_000, "output_tokens": 0, "seconds": 0.0, "billed_usd": 0.5},
+            {"role": "fast", "step": "read", "calls": 1, "input_tokens": 0, "output_tokens": 0, "seconds": 0.0}]
+    out = cost.summarise(rows, "anthropic", comments_read=40)
+    assert out["lines"][0]["usd"] == pytest.approx(1.0)       # 1M in x $1, not the 0.5 reported for one call
+
+
 def test_no_comments_read_means_no_projection():
     assert cost.summarise([], "anthropic", comments_read=0)["weekly_usd"] == 0

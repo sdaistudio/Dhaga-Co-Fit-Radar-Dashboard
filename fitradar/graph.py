@@ -30,7 +30,9 @@ STEPS = [
     {"n": 6, "title": "Write each finding", "by": "Strong", "desc": "From step 5's numbers and quotes only."},
     {"n": 7, "title": "Evaluate each finding", "by": "Fast + code", "desc": "Every figure and claim checked. A failure is rewritten once."},
 ]
-TAG_TO_REASON = {"Fit": "fit_other", "Quality": "quality", "Colour": "colour", "Changed mind": "changed_mind"}
+# "Fit" alone is an older tag with no direction; the review queue now offers the four directions.
+TAG_TO_REASON = {"Fit: too small": "fit_small", "Fit: too large": "fit_large", "Fit: too short": "fit_short", "Fit: too long": "fit_long",
+                 "Fit": "fit_other", "Quality": "quality", "Colour": "colour", "Changed mind": "changed_mind"}
 
 
 class State(TypedDict, total=False):
@@ -88,7 +90,8 @@ def load(state: State) -> State:
             row["path"].append({"by": "Person", "note": f"Tagged earlier by a person: {tags[r['comment_id']]}"})
         results[r["comment_id"]] = row
     return {"comments": comments, "units": units, "report": report, "results": results,
-            "step_counts": {"1": f"{report['in_file']:,} in · {report['dropped_duplicates']} dropped"},
+            "step_counts": {"1": f"{report['in_file']:,} in · {report['dropped_duplicates']} dropped"
+                                 + (f" · test run: first {report['limited_to']:,} only" if report["limited_to"] else "")},
             "step_seconds": _timed(state, 1, started), "rewrite_round": 0, "findings": {}}
 
 

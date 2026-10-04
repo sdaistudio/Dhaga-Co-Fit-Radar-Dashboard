@@ -62,7 +62,7 @@ Two CSV files, either the bundled ones in `data/` or your own uploaded on the Ru
 - **Front end:** plain HTML, CSS and JavaScript in `web/`. No build step.
 - **Server:** FastAPI (`server.py`).
 - **Pipeline:** a LangGraph state graph (`fitradar/graph.py`), seven steps.
-- **Models:** through LangChain. Claude by default, GPT optional, offline rules with no key. See `docs/MODEL_OPTIONS.md`.
+- **Models:** through LangChain. Claude by default, OpenRouter or GPT optional, offline rules with no key. See `docs/MODEL_OPTIONS.md`.
 - **Storage:** JSON files in `runs/`. No database. See `docs/DATA_AND_STORAGE.md`.
 
 | Step | Done by | Pattern |

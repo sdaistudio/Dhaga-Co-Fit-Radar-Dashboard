@@ -49,6 +49,10 @@ def load(comments_path: Path, units_path: Path):
     comments["text"] = comments["text"].astype(str).str.strip()
     comments = comments.drop_duplicates(subset=["order_id", "text"], keep="first").reset_index(drop=True)
     dropped = in_file - len(comments)
+    limited_to = None
+    if 0 < config.MAX_COMMENTS < len(comments):          # only a real cut counts as a test run
+        comments = comments.head(config.MAX_COMMENTS).reset_index(drop=True)
+        limited_to = config.MAX_COMMENTS
 
     comments["size"] = comments["size_bought"].map(normalise_size)
     created = pd.to_datetime(comments["created_at"], errors="coerce")
@@ -58,7 +62,7 @@ def load(comments_path: Path, units_path: Path):
     units["size"] = units["size"].map(normalise_size)
     units["units_sold"] = pd.to_numeric(units["units_sold"], errors="coerce").fillna(0).astype(int)
 
-    report = {"in_file": in_file, "dropped_duplicates": dropped, "unreadable_rule": int(comments["unreadable"].sum()),
+    report = {"in_file": in_file, "dropped_duplicates": dropped, "limited_to": limited_to, "unreadable_rule": int(comments["unreadable"].sum()),
               "to_read": int((~comments["unreadable"]).sum()),
               "week_of": str(comments["week_start"].max())}
     return comments, units, report

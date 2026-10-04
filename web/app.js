@@ -17,7 +17,8 @@ async function replayState() {
   const run = await fetch(REPLAY_RUN).then((r) => { if (!r.ok) throw new Error(`${REPLAY_RUN}: ${r.status}`); return r.json(); });
   const reader = run.provider === 'offline' ? 'Offline keyword rules (no model, no cost)' : `${run.models.fast} + ${run.models.strong}`;
   return { run, tags: local.get('tags'), actions: local.get('actions'), status: { running: false, step: 0, note: '', error: '' },
-    steps: run.steps, next_reader: 'not available in Replay mode', run_reader: reader, stand_in: true, replay: true };
+    steps: run.steps, next_reader: 'not available in Replay mode', run_reader: reader, stand_in: true, replay: true,
+    follow_up_days: 28 };   // Replay has no server: keep equal to FOLLOW_UP_DAYS in config.py
 }
 function saveTag(id, tag) {
   if (!S.replay) return api('/api/tag', { comment_id: id, tag });
@@ -27,8 +28,20 @@ function saveTag(id, tag) {
 function saveAction(body) {
   if (!S.replay) return api('/api/action', body);
   const acts = { ...S.data.actions };
-  if (body.decision) acts[body.key] = { decision: body.decision, fix: body.fix, label: body.label, when: new Date().toISOString().slice(0, 10) };
+  if (body.decision) acts[body.key] = { decision: body.decision, fix: body.fix, label: body.label, note: body.note || '', when: new Date().toISOString().slice(0, 10) };
   else delete acts[body.key];
+  return Promise.resolve(local.set('actions', acts));
+}
+function saveFixed(key, fixed) {
+  if (!S.replay) return api('/api/fixed', { key, fixed });
+  const acts = { ...S.data.actions };
+  if (!acts[key] || acts[key].decision !== 'ok') return Promise.resolve(acts);
+  const a = { ...acts[key] };
+  if (fixed) {
+    const today = new Date(); const due = new Date(today.getTime() + S.data.follow_up_days * 86400000);
+    a.fixed_on = today.toISOString().slice(0, 10); a.result_due = due.toISOString().slice(0, 10);
+  } else { delete a.fixed_on; delete a.result_due; }
+  acts[key] = a;
   return Promise.resolve(local.set('actions', acts));
 }
 
@@ -39,7 +52,7 @@ const REASONS = [
 ];
 const STATUS = { flag: ['Flag', 'p-flag'], watch: ['Watch', 'p-blue'], ok: ['OK', 'p-grey'], too_few: ['No call', 'p-grey'] };
 const BY = { Code: 'p-code', Fast: 'p-blue', Strong: 'p-dark', Person: 'p-flag', 'Fast + code': 'p-blue' };
-const TAGS = ['Fit', 'Quality', 'Colour', 'Changed mind', 'Cannot tell'];
+const TAGS = ['Fit: too small', 'Fit: too large', 'Fit: too short', 'Fit: too long', 'Quality', 'Colour', 'Changed mind', 'Cannot tell'];
 const pillFor = (c) => (c.status === 'unreadable_rule' ? 'p-grey' : c.status === 'queued' ? 'p-dark' : c.group === 'fit' ? 'p-solid'
   : c.group === 'quality' ? 'p-blue' : c.group === 'other' ? 'p-grey' : 'p-flag');
 
@@ -131,10 +144,18 @@ function detail(g) {
   }
   const f = g.finding;
   const quotes = g.quotes.slice(0, 2).map((q) => `<div class="quote">“${esc(q)}”</div>`).join('');
-  let buttons = `<div class="btns"><button class="btn primary" data-act="ok" data-key="${esc(g.key)}">Approve size-chart fix</button><button class="btn" data-act="back" data-key="${esc(g.key)}">Send back</button></div>`;
+  const undo = `<button class="btn small" data-act="undo" data-key="${esc(g.key)}" style="margin-left:8px">Undo</button>`;
+  let buttons = `<div class="col" style="gap:8px">
+      <label class="h" for="fixtext">Wording for the listing team. Edit it if you want to change it.</label>
+      <textarea id="fixtext" rows="3">${esc(f.suggested_fix)}</textarea>
+      <label class="h" for="notetext">Your note (optional). If you send it back, say why.</label>
+      <input id="notetext" type="text" maxlength="300" placeholder="For example: the vendor already changed this chart last week">
+      <div class="btns"><button class="btn primary" data-act="ok" data-key="${esc(g.key)}">Approve size-chart fix</button><button class="btn" data-act="back" data-key="${esc(g.key)}">Send back</button></div>
+      <div class="note">Approve adds the fix to the Actions tab for the listing team. Send back records your note and adds nothing to Actions. Neither sends a message to anyone.</div></div>`;
   if (g.status === 'watch') buttons = '<div class="note">Watch only. Nothing to approve yet.</div>';
-  if (act?.decision === 'ok') buttons = `<div class="okbox">Approved. Added to Actions for the listing team. <button class="btn small" data-act="undo" data-key="${esc(g.key)}" style="margin-left:8px">Undo</button></div>`;
-  if (act?.decision === 'back') buttons = `<div class="warnbox"><b>Sent back.</b> It will be re-read with more data next week. <button class="btn small" data-act="undo" data-key="${esc(g.key)}" style="margin-left:8px">Undo</button></div>`;
+  const noteLine = act?.note ? `<div style="font-weight:400;margin-top:6px">Your note: ${esc(act.note)}</div>` : '';
+  if (act?.decision === 'ok') buttons = `<div class="okbox">Approved. Added to Actions for the listing team. ${undo}${noteLine}</div>`;
+  if (act?.decision === 'back') buttons = `<div class="warnbox"><b>Sent back.</b> Nothing was added to Actions. The finding shows again whenever the data is read again. ${undo}${noteLine}</div>`;
   return `${top}<div class="headline">${esc(f.headline)}</div><div>${esc(f.evidence)}</div>${charts}
     <div class="col" style="gap:5px"><div class="h">What customers wrote</div>${quotes}</div>
     <div class="fix"><b>Suggested fix:</b> ${esc(f.suggested_fix)}</div>
@@ -190,15 +211,27 @@ function viewQueue() {
 // ---- Actions -------------------------------------------------------------
 function viewActions() {
   const acts = Object.entries(S.data.actions).filter(([, a]) => a.decision === 'ok');
-  const rows = acts.map(([, a]) => `<div class="step"><div class="row g-actions" style="border:none;padding:0;min-height:0">
-      <span class="mono"><b>${esc(a.label)}</b></span><span>${esc(a.fix)}</span><span class="note">${esc(a.when)}</span><span><span class="pill p-flag">With listing team</span></span></div>
-      <div class="quote" style="font-style:normal;margin-top:6px">Not measured yet. Fit Radar compares this vendor before and after, four weeks from the fix.</div></div>`).join('');
+  const days = S.data.follow_up_days || 28, weeks = Math.round(days / 7);
+  const rows = acts.map(([key, a]) => {
+    const fixed = !!a.fixed_on;
+    const status = fixed ? `<span class="pill p-solid">Fixed on ${esc(a.fixed_on)}</span><div class="note">Result due ${esc(a.result_due)}</div>`
+      : '<span class="pill p-flag">With listing team</span>';
+    const progress = fixed
+      ? `Not measured yet. Fit Radar compares this vendor's fit-return rate before and after, ${weeks} weeks from ${esc(a.fixed_on)}, against similar vendors that were not changed. The result is due ${esc(a.result_due)}.`
+      : '';
+    const button = fixed ? `<button class="btn small" data-fixed="0" data-key="${esc(key)}">Undo</button>`
+      : `<button class="btn small primary" data-fixed="1" data-key="${esc(key)}">Mark as fixed</button>`;
+    return `<div class="step"><div class="row g-actions" style="border:none;padding:0;min-height:0">
+      <span class="mono"><b>${esc(a.label)}</b></span><span>${esc(a.fix)}</span><span class="note">${esc(a.when)}</span><span>${status}</span></div>
+      ${a.note ? `<div class="note" style="margin-top:6px">Note: ${esc(a.note)}</div>` : ''}
+      ${progress ? `<div class="quote" style="font-style:normal;margin-top:6px">${progress}</div>` : ''}<div style="margin-top:8px">${button}</div></div>`;
+  }).join('');
   return `<div class="split"><div class="card col"><h2>Approved fixes, and whether they worked</h2>
       <div class="head g-actions cap"><span>Vendor</span><span>Fix</span><span>Approved</span><span>Status</span></div>
       ${rows || '<p class="empty">Nothing approved yet. Approve a finding on the This week tab and it appears here.</p>'}</div>
     <div class="card col" style="padding:18px 20px;gap:12px"><h2 style="padding:0">How a fix is judged</h2>
       <div>1. The listing team corrects the size chart for the flagged vendor and category.</div>
-      <div>2. Four weeks later Fit Radar compares that vendor's fit-return rate before and after.</div>
+      <div>2. When it is marked as fixed, the ${weeks} weeks start. After that Fit Radar compares that vendor's fit-return rate before and after.</div>
       <div>3. It sets that against similar vendors that were not changed, so a general rise or fall is not counted as a win.</div>
       <div class="fix">All of this uses orders and returns data the business already holds.</div>
       <div class="note">Findings are reported by vendor, category and size chart, so they still apply when individual products are replaced.</div></div></div>`;
@@ -267,9 +300,14 @@ document.addEventListener('click', async (e) => {
   else if (ds.comment) { S.cSel = ds.comment; render(); }
   else if (ds.more) { S.shownQueue += 8; render(); }
   else if (ds.tag !== undefined) { S.data.tags = await saveTag(ds.id, ds.tag || null); render(); }
-  else if (ds.act) {
+  else if (ds.fixed !== undefined) {
+    try { S.data.actions = await saveFixed(ds.key, ds.fixed === '1'); } catch { /* not approved: nothing to mark */ }
+    render();
+  } else if (ds.act) {
     const g = S.data.run.groups.find((x) => x.key === ds.key);
-    const body = { key: ds.key, decision: ds.act === 'undo' ? null : ds.act, fix: g.finding?.suggested_fix || '', label: `${g.vendor_id} ${g.category}` };
+    const fix = ($('fixtext')?.value || '').trim() || g.finding?.suggested_fix || '';
+    const note = ($('notetext')?.value || '').trim();
+    const body = { key: ds.key, decision: ds.act === 'undo' ? null : ds.act, fix, note, label: `${g.vendor_id} ${g.category}` };
     S.data.actions = await saveAction(body); render();
   } else if (ds.run && !S.replay) { S.data.status = await api('/api/run', {}); render(); startPolling(); }
   else if (ds.upload) {

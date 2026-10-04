@@ -1,12 +1,14 @@
 """The readers. One interface, three ways to fill it:
 
   ModelReader("anthropic")  Claude Haiku (fast) + Claude Sonnet (strong), through LangChain
+  ModelReader("openrouter") Any models through OpenRouter (OpenAI-compatible API), through LangChain
   ModelReader("openai")     GPT fast + GPT strong, through LangChain
   OfflineReader()           keyword rules, no model call. For demos with no API key.
 
 Every model call returns a validated Pydantic record (structured output). Free text is never parsed.
 """
 import json
+import os
 import re
 import time
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -18,6 +20,14 @@ def _prompt(name: str) -> str:
     return (config.PROMPTS_DIR / f"{name}.md").read_text(encoding="utf-8")
 
 
+class ModelError(RuntimeError):
+    """The model service could not be used. The message is written for the screen."""
+
+
+def _describe(error) -> str:
+    return f"{type(error).__name__}: {str(error)[:300]}"
+
+
 class Usage:
     """Token and time log for one run."""
     def __init__(self):
@@ -25,8 +35,11 @@ class Usage:
 
     def add(self, role, step, raw=None, seconds=0.0, calls=1):
         meta = getattr(raw, "usage_metadata", None) or {}
+        # OpenRouter reports what each call actually cost. Routers bill at the price of whichever model served the call.
+        billed = ((getattr(raw, "response_metadata", None) or {}).get("token_usage") or {}).get("cost")
         self.rows.append({"role": role, "step": step, "calls": calls, "input_tokens": int(meta.get("input_tokens", 0)),
-                          "output_tokens": int(meta.get("output_tokens", 0)), "seconds": round(seconds, 2)})
+                          "output_tokens": int(meta.get("output_tokens", 0)), "seconds": round(seconds, 2),
+                          "billed_usd": float(billed) if isinstance(billed, (int, float)) else None})
 
 
 def make_reader(provider: str):
@@ -39,6 +52,7 @@ class ModelReader:
         self.provider = provider
         self.models = config.MODELS[provider]
         self.usage = Usage()
+        self.last_error = ""
         if not self.models["fast"] or not self.models["strong"]:
             raise RuntimeError(f"Model names for '{provider}' are not set. See docs/MODEL_OPTIONS.md.")
         # Schema-constrained JSON output. Claude needs method="json_schema"; forced tool calling is not supported on every Claude model.
@@ -53,6 +67,9 @@ class ModelReader:
             from langchain_anthropic import ChatAnthropic
             return ChatAnthropic(model=self.models[role], temperature=temperature, max_tokens=4096, timeout=120, max_retries=3)
         from langchain_openai import ChatOpenAI
+        if self.provider == "openrouter":
+            return ChatOpenAI(model=self.models[role], temperature=temperature, timeout=120, max_retries=3,
+                              base_url=config.OPENROUTER_BASE_URL, api_key=os.getenv("OPENROUTER_API_KEY"))
         return ChatOpenAI(model=self.models[role], temperature=temperature, timeout=120, max_retries=3)
 
     @staticmethod
@@ -61,20 +78,27 @@ class ModelReader:
 
     # step 2: parallelization. Batches run side by side; a failed batch is retried, then split.
     def read_batches(self, batches: list[list[dict]]) -> dict:
-        out, failed = {}, []
+        out, failed, errors = {}, [], []
         started = time.time()
         inputs = [self._messages("classify", b) for b in batches]
         replies = self._read.batch(inputs, config={"max_concurrency": config.MAX_CONCURRENCY}, return_exceptions=True)
         for batch, reply in zip(batches, replies):
             parsed = None if isinstance(reply, Exception) else reply.get("parsed")
-            if not isinstance(reply, Exception):
+            if isinstance(reply, Exception):
+                errors.append(_describe(reply))
+            else:
                 self.usage.add("fast", "read", reply.get("raw"))
+                if not parsed:
+                    errors.append(f"The reply did not match the expected format: {_describe(reply.get('parsing_error') or 'empty reply')}")
             got = {r.comment_id: r for r in parsed.readings} if parsed else {}
             for c in batch:
                 if c["comment_id"] in got:
                     out[c["comment_id"]] = got[c["comment_id"]]
                 else:
                     failed.append(c)
+        # If not one comment was read, retrying them singly cannot help: stop and say why.
+        if not out and errors:
+            raise ModelError(f"The fast model could not read any comments. First error: {errors[0]}")
         # retry what failed, one comment at a time
         for c in failed:
             try:
@@ -95,7 +119,8 @@ class ModelReader:
         started = time.time()
         try:
             reply = self._reread.invoke(self._messages("reread", payload))
-        except Exception:
+        except Exception as error:
+            self.last_error = _describe(error)
             return None
         self.usage.add("strong", "reread", reply.get("raw"), time.time() - started)
         parsed = reply.get("parsed")

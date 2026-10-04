@@ -57,7 +57,7 @@ data/units_sold.csv ┴─> 1 Load and clean (code)
 | Each comment | Confidence on every reading | Strong model re-reads; then a person |
 | Each finding | Code matches every number to the data; fast model checks every claim | Rewritten once; then shown as "not verified" |
 | The prompts | `python -m fitradar.accuracy` against `data/gold_labels.csv` | Revise, re-test, keep only if the score rises; log it in `prompts/CHANGELOG.md` |
-| Each approved fix | Fit-return rate before and after, against unchanged vendors | Not built yet; needs four weeks of real data |
+| Each approved fix | Fit-return rate before and after, against unchanged vendors | Tracking is built: a person marks a fix as live and the result due date is set (`FOLLOW_UP_DAYS` in `config.py`). The before and after comparison itself is not built; it needs four weeks of real data after the fix |
 
 ## Flagging rule
 
