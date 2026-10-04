@@ -12,6 +12,7 @@ import config
 from fitradar import store
 from fitradar.graph import STEPS, run_pipeline
 from fitradar.ingest import BadFile
+from fitradar.llm import ModelError
 
 app = FastAPI(title="Fit Radar")
 STATUS = {"running": False, "step": 0, "note": "", "error": ""}
@@ -38,7 +39,7 @@ def state():
     provider = config.resolve_provider()
     comments, units, uploaded = _paths()
     return {"run": run, "tags": store.tags(), "actions": store.actions(), "status": STATUS, "steps": STEPS,
-            "next_provider": provider, "next_reader": _reader_label(provider),
+            "follow_up_days": config.FOLLOW_UP_DAYS, "next_provider": provider, "next_reader": _reader_label(provider),
             "run_reader": _reader_label(run["provider"], run.get("models")) if run else "",
             "stand_in": not uploaded, "has_saved_run": (config.RUNS_DIR / "latest" / "run.json").exists()}
 
@@ -57,6 +58,8 @@ def _work():
         STATUS.update(step=8, note="", error="")
     except BadFile as error:
         STATUS.update(error=str(error))
+    except ModelError as error:
+        STATUS.update(error=f"The run stopped at step {STATUS['step']}. {error}")
     except Exception as error:                      # shown on screen as a sentence, never as a traceback
         STATUS.update(error=f"The run stopped at step {STATUS['step']}: {type(error).__name__}. Nothing was lost. Press Run to try again.")
     finally:
@@ -88,11 +91,25 @@ class Action(BaseModel):
     decision: str | None = None      # "ok", "back" or None to undo
     fix: str = ""
     label: str = ""
+    note: str = ""
 
 
 @app.post("/api/action")
 def action(body: Action):
-    return store.set_action(body.key, body.decision, body.fix, body.label)
+    return store.set_action(body.key, body.decision, body.fix, body.label, body.note)
+
+
+class Fixed(BaseModel):
+    key: str
+    fixed: bool = True
+
+
+@app.post("/api/fixed")
+def fixed(body: Fixed):
+    try:
+        return store.set_fixed(body.key, body.fixed)
+    except ValueError as error:
+        raise HTTPException(409, str(error))
 
 
 @app.post("/api/upload")

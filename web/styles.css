@@ -96,6 +96,9 @@ h2{font-size:16px;font-weight:700;margin:0;padding:0 8px 4px}
 .empty{color:var(--muted);padding:12px}
 .scroll{max-height:560px;overflow-y:auto}
 input[type=file]{font:inherit;max-width:100%}
+textarea,input[type=text]{font:inherit;font-size:14px;width:100%;box-sizing:border-box;padding:9px 12px;border:2px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)}
+textarea{resize:vertical}
+textarea:focus-visible,input[type=text]:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
 
 @media (max-width:980px){
   main{padding:16px}
